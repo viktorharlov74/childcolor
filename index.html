@@ -222,6 +222,29 @@
       background: transparent;
     }
 
+    .celebration {
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .celebration-star {
+      position: absolute;
+      top: -14px;
+      left: var(--star-x);
+      width: var(--star-size);
+      aspect-ratio: 1;
+      background: var(--star-color);
+      clip-path: polygon(50% 0, 62% 34%, 98% 36%, 70% 58%, 80% 94%, 50% 73%, 20% 94%, 30% 58%, 2% 36%, 38% 34%);
+      animation: star-fall var(--star-time) linear var(--star-delay) both;
+    }
+
+    @keyframes star-fall {
+      0% { opacity: 0; transform: translate3d(0, 0, 0) rotate(-18deg); }
+      14% { opacity: 0.95; }
+      78% { opacity: 0.85; }
+      100% { opacity: 0; transform: translate3d(var(--star-drift), var(--star-fall), 0) rotate(var(--star-turn)); }
+    }
+
     .result-tools {
       display: grid;
       align-self: start;
@@ -254,6 +277,7 @@
     @media (prefers-reduced-motion: reduce) {
       .editor.is-complete .tools { transition: none; }
       .result-tools { animation: none; }
+      .celebration { display: none; }
     }
 
     .palette {
@@ -1248,6 +1272,7 @@
           <svg class="outline" viewBox="0 0 1200 1200" aria-hidden="true"><use width="1200" height="1200"/></svg>
         </div>
         <button class="replay" type="button" aria-label="Оживить кота" hidden></button>
+        <div class="celebration" aria-hidden="true"></div>
       </div>
 
       <div class="editor-controls">
@@ -1291,6 +1316,8 @@
     const catPreview = catCard.querySelector(".saved-cat-preview");
     const catStorageKey = "childcolor.completed-cat.v1";
     const artwork = document.querySelector(".artwork");
+    const celebration = document.querySelector(".celebration");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const tools = document.querySelector(".tools");
     const replay = document.querySelector(".replay");
     const resultTools = document.querySelector(".result-tools");
@@ -1349,6 +1376,29 @@
         if (paint) localStorage.setItem(catStorageKey, paint);
         else localStorage.removeItem(catStorageKey);
       } catch {}
+    }
+
+    function releaseStars() {
+      if (reducedMotion.matches || document.hidden) return;
+
+      const colors = ["#edac24", "#ec6b9a", "#649eef", "#9e78e4", "#4bb890"];
+      const stars = document.createDocumentFragment();
+      celebration.style.setProperty("--star-fall", `${celebration.clientHeight + 16}px`);
+
+      for (let index = 0; index < 18; index++) {
+        const star = document.createElement("span");
+        star.className = "celebration-star";
+        star.style.setProperty("--star-x", `${5 + index * 17 % 88}%`);
+        star.style.setProperty("--star-size", `${7 + index * 5 % 7}px`);
+        star.style.setProperty("--star-color", colors[index % colors.length]);
+        star.style.setProperty("--star-delay", `${index * 26}ms`);
+        star.style.setProperty("--star-time", `${1080 + index % 5 * 110}ms`);
+        star.style.setProperty("--star-drift", `${(index % 5 - 2) * 9}px`);
+        star.style.setProperty("--star-turn", `${index % 2 ? -125 : 145}deg`);
+        star.addEventListener("animationend", () => star.remove(), { once: true });
+        stars.append(star);
+      }
+      celebration.replaceChildren(stars);
     }
 
     function showCatResult() {
@@ -1508,6 +1558,7 @@
       resultFile = null;
       editor.classList.remove("is-complete");
       tools.inert = false;
+      celebration.replaceChildren();
       for (const animation of artwork.getAnimations()) animation.cancel();
     }
 
@@ -1541,6 +1592,7 @@
       playCompletionSound();
       rememberCatPaint(canvas.toDataURL("image/png"));
       showCatResult();
+      releaseStars();
       prepareSave();
     }
 
@@ -1572,7 +1624,7 @@
         catMeow.play().catch(() => {});
       }
 
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      if (reducedMotion.matches) {
         artwork.animate([{ opacity: 1 }, { opacity: 0.72 }, { opacity: 1 }], { duration: 250 });
         return;
       }
