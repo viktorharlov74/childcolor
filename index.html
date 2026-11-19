@@ -39,6 +39,10 @@
 
     .art-library { position: absolute; }
 
+    .drawing-open,
+    .drawing-open body,
+    .editor { touch-action: none; }
+
     .gallery,
     .editor {
       display: grid;
@@ -1242,9 +1246,9 @@
       <section class="gallery-group" aria-labelledby="other-group">
         <h2 id="other-group">Остальные</h2>
         <div class="gallery-grid">
-          <button class="drawing-card" type="button" data-drawing="cat" style="--tile: #fbedf4; --paper: #f4beda">
+          <button class="drawing-card" type="button" data-drawing="cat" data-tap-sound="./sounds/cat-meow.wav?v=2"
+            style="--tile: #fbedf4; --paper: #f4beda">
             <svg viewBox="0 0 1200 1200" aria-hidden="true">
-              <image class="saved-cat-preview" width="1200" height="1200" hidden/>
               <use href="#drawing-cat" width="1200" height="1200"/>
             </svg>
             <span>Кот</span>
@@ -1271,7 +1275,7 @@
           <canvas width="1200" height="1200"></canvas>
           <svg class="outline" viewBox="0 0 1200 1200" aria-hidden="true"><use width="1200" height="1200"/></svg>
         </div>
-        <button class="replay" type="button" aria-label="Оживить кота" hidden></button>
+        <button class="replay" type="button" aria-label="Оживить рисунок" hidden></button>
         <div class="celebration" aria-hidden="true"></div>
       </div>
 
@@ -1289,7 +1293,7 @@
           </div>
           <div class="drawing-actions">
             <button class="reset" type="button"><span aria-hidden="true">↺</span> Очистить</button>
-            <button class="sound-toggle" type="button" aria-label="Звук" aria-pressed="true" hidden>
+            <button class="sound-toggle" type="button" aria-label="Звук" aria-pressed="true">
               <span aria-hidden="true">♫</span>
             </button>
           </div>
@@ -1305,6 +1309,7 @@
     </section>
   </main>
 
+  <script src="./drawing-session.js"></script>
   <script>
     const gallery = document.querySelector(".gallery");
     const editor = document.querySelector(".editor");
@@ -1312,96 +1317,43 @@
     const outline = document.querySelector(".outline use");
     const canvas = document.querySelector("canvas");
     const context = canvas.getContext("2d");
-    const catCard = gallery.querySelector('[data-drawing="cat"]');
-    const catPreview = catCard.querySelector(".saved-cat-preview");
-    const catStorageKey = "childcolor.completed-cat.v1";
     const artwork = document.querySelector(".artwork");
     const celebration = document.querySelector(".celebration");
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const tools = document.querySelector(".tools");
     const replay = document.querySelector(".replay");
     const resultTools = document.querySelector(".result-tools");
     const saveButton = document.querySelector(".save-result");
     const saveStatus = document.querySelector(".save-status");
     const soundToggle = document.querySelector(".sound-toggle");
-    const catMusic = document.createElement("audio");
-    catMusic.preload = "none";
-    catMusic.loop = true;
-    catMusic.src = "./sounds/cat-background.wav?v=2";
-    const catMeow = document.createElement("audio");
-    catMeow.preload = "none";
-    catMeow.src = "./sounds/cat-meow.wav?v=2";
     const defaultSwatch = document.querySelector('.swatch[aria-pressed="true"]');
     const mouseBrushRadius = 29.4;
     const touchBrushRadius = 39;
     const sampleSpacing = 6;
+    const results = new DrawingTools.DrawingResults();
+    const sound = new DrawingTools.DrawingSound("./sounds/cat-background.wav?v=2");
+    const session = new DrawingTools.DrawingSession(canvas, context, results, completeDrawing);
     let activeStroke = null;
     let selectedSwatch = defaultSwatch;
-    let selectedCard = null;
-    let silhouette = null;
     let galleryScroll = 0;
-    let catTimer = null;
-    let catMask = null;
-    let catArea = 0;
-    let needsCoverageCheck = false;
-    let soundEnabled = true;
-    let audioContext = null;
-    let chime = null;
     let exportJob = null;
     let resultFile = null;
-    let savedCatPaint = null;
 
-    function updateCatPreview() {
-      catCard.classList.toggle("has-saved-art", savedCatPaint !== null);
-      catPreview.toggleAttribute("hidden", savedCatPaint === null);
-      if (savedCatPaint) {
-        catPreview.setAttribute("href", savedCatPaint);
-        catCard.setAttribute("aria-label", "Кот, готовая раскраска");
+    function updatePreview(drawing) {
+      const paint = results.get(drawing.id);
+      drawing.card.classList.toggle("has-saved-art", Boolean(paint));
+
+      if (paint) {
+        drawing.preview.setAttribute("href", paint);
+        drawing.preview.removeAttribute("hidden");
+        drawing.card.setAttribute("aria-label", drawing.name + ", готовая раскраска");
       } else {
-        catPreview.removeAttribute("href");
-        catCard.removeAttribute("aria-label");
+        drawing.preview.setAttribute("hidden", "");
+        drawing.preview.removeAttribute("href");
+        drawing.card.removeAttribute("aria-label");
       }
     }
 
-    try {
-      const storedPaint = localStorage.getItem(catStorageKey);
-      if (storedPaint?.startsWith("data:image/png;base64,")) savedCatPaint = storedPaint;
-    } catch {}
-    updateCatPreview();
-
-    function rememberCatPaint(paint) {
-      savedCatPaint = paint;
-      updateCatPreview();
-      try {
-        if (paint) localStorage.setItem(catStorageKey, paint);
-        else localStorage.removeItem(catStorageKey);
-      } catch {}
-    }
-
-    function releaseStars() {
-      if (reducedMotion.matches || document.hidden) return;
-
-      const colors = ["#edac24", "#ec6b9a", "#649eef", "#9e78e4", "#4bb890"];
-      const stars = document.createDocumentFragment();
-      celebration.style.setProperty("--star-fall", `${celebration.clientHeight + 16}px`);
-
-      for (let index = 0; index < 18; index++) {
-        const star = document.createElement("span");
-        star.className = "celebration-star";
-        star.style.setProperty("--star-x", `${5 + index * 17 % 88}%`);
-        star.style.setProperty("--star-size", `${7 + index * 5 % 7}px`);
-        star.style.setProperty("--star-color", colors[index % colors.length]);
-        star.style.setProperty("--star-delay", `${index * 26}ms`);
-        star.style.setProperty("--star-time", `${1080 + index % 5 * 110}ms`);
-        star.style.setProperty("--star-drift", `${(index % 5 - 2) * 9}px`);
-        star.style.setProperty("--star-turn", `${index % 2 ? -125 : 145}deg`);
-        star.addEventListener("animationend", () => star.remove(), { once: true });
-        stars.append(star);
-      }
-      celebration.replaceChildren(stars);
-    }
-
-    function showCatResult() {
+    function showResult() {
       editor.classList.add("is-complete");
       tools.inert = true;
       replay.hidden = false;
@@ -1411,57 +1363,31 @@
       replay.focus({ preventScroll: true });
     }
 
-    async function restoreCatResult(paint) {
-      const preview = new Image();
-      preview.src = paint;
-      try {
-        await preview.decode();
-        if (savedCatPaint !== paint || replay.hidden || editor.hidden) return;
-        context.drawImage(preview, 0, 0);
-      } catch {
-        if (savedCatPaint === paint && !replay.hidden && !editor.hidden) restartCat();
-        return;
-      }
-      prepareSave();
+    function clearResultControls() {
+      replay.hidden = true;
+      resultTools.hidden = true;
+      exportJob = null;
+      resultFile = null;
+      editor.classList.remove("is-complete");
+      tools.inert = false;
+      celebration.replaceChildren();
+      for (const animation of artwork.getAnimations()) animation.cancel();
     }
 
-    async function renderCatPng() {
-      const drawing = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      drawing.setAttribute("viewBox", "0 0 1200 1200");
-      drawing.setAttribute("width", String(canvas.width));
-      drawing.setAttribute("height", String(canvas.height));
-      for (const part of document.getElementById("drawing-cat").children) {
-        drawing.append(part.cloneNode(true));
-      }
-      const source = new XMLSerializer().serializeToString(drawing);
-      const url = URL.createObjectURL(new Blob([source], { type: "image/svg+xml" }));
-      const exported = document.createElement("canvas");
-      exported.width = canvas.width;
-      exported.height = canvas.height;
-      const output = exported.getContext("2d");
-      output.fillStyle = "#ffffff";
-      output.fillRect(0, 0, exported.width, exported.height);
-      output.drawImage(canvas, 0, 0);
-
-      try {
-        const lines = new Image();
-        lines.src = url;
-        await lines.decode();
-        output.drawImage(lines, 0, 0);
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-
-      const png = await new Promise((resolve) => exported.toBlob(resolve, "image/png"));
-      if (!png) throw new Error("PNG export failed");
-      return new File([png], "Кот — Раскраска Анны.png", { type: "image/png" });
+    function completeDrawing(drawing) {
+      releaseBrush();
+      sound.playCompletion();
+      updatePreview(drawing);
+      showResult();
+      DrawingTools.releaseStars(celebration);
+      prepareSave();
     }
 
     function prepareSave() {
       saveButton.disabled = true;
       saveStatus.hidden = true;
 
-      const job = renderCatPng();
+      const job = DrawingTools.renderPng(canvas, session.drawing);
       exportJob = job;
       job.then((file) => {
         if (exportJob !== job) return;
@@ -1475,141 +1401,51 @@
       });
     }
 
-    saveButton.addEventListener("click", async () => {
-      const file = resultFile;
-      if (!file) {
-        prepareSave();
-        return;
-      }
-
-      const share = { files: [file] };
-      if (navigator.canShare?.(share)) {
-        try {
-          await navigator.share(share);
-          return;
-        } catch (error) {
-          if (error.name === "AbortError") return;
-        }
-      }
-
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(file);
-      link.href = url;
-      link.download = file.name;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    saveButton.addEventListener("click", () => {
+      if (resultFile) DrawingTools.saveFile(resultFile);
+      else prepareSave();
     });
 
-    function startCatMusic() {
-      if (!soundEnabled) return;
-
-      const AudioEngine = window.AudioContext || window.webkitAudioContext;
-      if (AudioEngine) {
-        audioContext ??= new AudioEngine();
-        audioContext.resume().catch(() => {});
-      }
-      catMusic.play().catch(() => {});
-    }
-
-    function playCompletionSound() {
-      if (!soundEnabled || audioContext?.state !== "running") return;
-
-      if (!chime) {
-        chime = audioContext.createGain();
-        chime.connect(audioContext.destination);
-      }
-      const start = audioContext.currentTime;
-      const notes = [523.25, 659.25, 783.99, 1046.5];
-
-      for (const [index, frequency] of notes.entries()) {
-        const note = audioContext.createOscillator();
-        const envelope = audioContext.createGain();
-        const onset = start + index * 0.1;
-        note.type = "sine";
-        note.frequency.value = frequency;
-        envelope.gain.setValueAtTime(0, onset);
-        envelope.gain.linearRampToValueAtTime(0.084, onset + 0.025);
-        envelope.gain.exponentialRampToValueAtTime(0.0007, onset + 0.55);
-        note.connect(envelope).connect(chime);
-        note.start(onset);
-        note.stop(onset + 0.56);
-      }
-    }
-
-    function startCatSession() {
-      catTimer = setInterval(checkCatCoverage, 5000);
-      startCatMusic();
-    }
-
-    function stopCatSession() {
-      clearInterval(catTimer);
-      catTimer = null;
-      catMusic.pause();
-      catMusic.currentTime = 0;
-      catMeow.pause();
-      catMeow.currentTime = 0;
-      chime?.disconnect();
-      chime = null;
-      replay.hidden = true;
-      resultTools.hidden = true;
-      exportJob = null;
-      resultFile = null;
-      editor.classList.remove("is-complete");
-      tools.inert = false;
-      celebration.replaceChildren();
-      for (const animation of artwork.getAnimations()) animation.cancel();
-    }
-
-    function checkCatCoverage() {
-      if (!needsCoverageCheck) return;
-      needsCoverageCheck = false;
-
-      if (catMask === null) {
-        const mask = document.createElement("canvas");
-        mask.width = canvas.width;
-        mask.height = canvas.height;
-        const maskContext = mask.getContext("2d");
-        maskContext.fill(silhouette);
-        catMask = maskContext.getImageData(0, 0, canvas.width, canvas.height).data;
-        for (let index = 3; index < catMask.length; index += 4) {
-          if (catMask[index] >= 128) catArea++;
-        }
-      }
-
-      const paint = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      let colored = 0;
-      for (let index = 3; index < catMask.length; index += 4) {
-        if (catMask[index] >= 128 && paint[index] >= 128) colored++;
-      }
-      if (colored * 100 < catArea * 98) return;
-
-      clearInterval(catTimer);
-      catTimer = null;
+    function restartDrawing() {
+      const drawing = session.drawing;
+      results.set(drawing.id, null);
+      updatePreview(drawing);
       releaseBrush();
-      catMusic.pause();
-      playCompletionSound();
-      rememberCatPaint(canvas.toDataURL("image/png"));
-      showCatResult();
-      releaseStars();
-      prepareSave();
+      sound.stop();
+      clearResultControls();
+      session.open(drawing);
+      selectColor(defaultSwatch);
+      session.start();
+      sound.startMusic();
+      editorTitle.focus({ preventScroll: true });
     }
+
+    editor.querySelector(".restart-result").addEventListener("click", restartDrawing);
 
     soundToggle.addEventListener("click", () => {
-      soundEnabled = !soundEnabled;
-      soundToggle.setAttribute("aria-pressed", String(soundEnabled));
-      if (soundEnabled) startCatMusic();
-      else catMusic.pause();
+      sound.enabled = !sound.enabled;
+      soundToggle.setAttribute("aria-pressed", String(sound.enabled));
+      if (sound.enabled) sound.startMusic();
+      else sound.pause();
     });
 
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        catMusic.pause();
-        catMeow.pause();
-      } else if (catTimer !== null && soundEnabled) {
-        catMusic.play().catch(() => {});
+    function preventDrawingZoom(event) {
+      // Chromium represents a trackpad pinch as a wheel event with Ctrl held.
+      if (event.type !== "wheel" || event.ctrlKey) event.preventDefault();
+    }
+
+    function setDrawingGesturesLocked(locked) {
+      document.documentElement.classList.toggle("drawing-open", locked);
+
+      for (const type of ["gesturestart", "gesturechange", "wheel"]) {
+        if (locked) document.addEventListener(type, preventDrawingZoom, { passive: false });
+        else document.removeEventListener(type, preventDrawingZoom);
       }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) sound.pause();
+      else if (session.isPainting) sound.resumeMusic();
     });
 
     replay.addEventListener("click", (event) => {
@@ -1617,25 +1453,10 @@
 
       if (event.detail > 0) {
         const point = positionOnCanvas(event);
-        if (!context.isPointInPath(silhouette, point.x, point.y)) return;
+        if (!context.isPointInPath(session.drawing.silhouette, point.x, point.y)) return;
       }
-      if (soundEnabled) {
-        catMeow.currentTime = 0;
-        catMeow.play().catch(() => {});
-      }
-
-      if (reducedMotion.matches) {
-        artwork.animate([{ opacity: 1 }, { opacity: 0.72 }, { opacity: 1 }], { duration: 250 });
-        return;
-      }
-
-      artwork.animate([
-        { transform: "translateY(0) rotateY(0deg) rotateZ(0deg)" },
-        { transform: "translateY(-5%) rotateY(55deg) rotateZ(-8deg)", offset: 0.23 },
-        { transform: "translateY(-8%) rotateY(180deg) rotateZ(0deg)", offset: 0.5 },
-        { transform: "translateY(-2%) rotateY(315deg) rotateZ(7deg)", offset: 0.82 },
-        { transform: "translateY(0) rotateY(360deg) rotateZ(0deg)" },
-      ], { duration: 870, easing: "ease-in-out" });
+      sound.playTap(session.drawing.tapSound);
+      DrawingTools.animateDrawing(artwork, session.drawing.id);
     });
 
     function selectColor(swatch) {
@@ -1644,46 +1465,66 @@
       selectedSwatch = swatch;
     }
 
-    for (const swatch of document.querySelectorAll(".swatch")) {
+    for (const swatch of editor.querySelectorAll(".swatch")) {
       swatch.addEventListener("click", () => selectColor(swatch));
     }
 
     for (const card of gallery.querySelectorAll(".drawing-card")) {
-      const symbol = document.getElementById("drawing-" + card.dataset.drawing);
-      const contours = Array.from(symbol.querySelectorAll("[data-silhouette]"), (shape) => shape.getAttribute("d"));
-      const path = new Path2D(contours.join(" "));
+      const id = card.dataset.drawing;
+      const name = card.querySelector("span").textContent;
+      const symbol = document.getElementById("drawing-" + id);
+      const contours = Array.from(symbol.querySelectorAll("[data-silhouette]"), shape => shape.getAttribute("d"));
+      const preview = document.createElementNS(symbol.namespaceURI, "image");
+      const { width, height } = symbol.viewBox.baseVal;
+      preview.setAttribute("width", String(width));
+      preview.setAttribute("height", String(height));
+      card.querySelector("svg").prepend(preview);
+
+      const drawing = {
+        id, name, card, symbol, preview,
+        silhouette: new Path2D(contours.join(" ")),
+        tapSound: card.dataset.tapSound,
+      };
+      updatePreview(drawing);
+
       card.addEventListener("click", () => {
-        selectedCard = card;
         galleryScroll = window.scrollY;
-        silhouette = path;
-        const name = card.querySelector("span").textContent;
+        const savedPaint = session.open(drawing);
         outline.setAttribute("href", "#" + symbol.id);
         editorTitle.textContent = name;
         canvas.setAttribute("aria-label", "Раскраска — " + name);
-        resetPainting();
+        replay.setAttribute("aria-label", "Оживить рисунок «" + name + "»");
         selectColor(defaultSwatch);
-        soundToggle.hidden = card !== catCard;
         gallery.hidden = true;
         editor.hidden = false;
+        setDrawingGesturesLocked(true);
         window.scrollTo(0, 0);
         editorTitle.focus({ preventScroll: true });
 
-        if (card === catCard && savedCatPaint) {
-          showCatResult();
-          restoreCatResult(savedCatPaint);
-        } else if (card === catCard) {
-          startCatSession();
+        if (savedPaint) {
+          showResult();
+          session.restore(savedPaint).then(status => {
+            if (status === "restored") prepareSave();
+            else if (status === "invalid") restartDrawing();
+          });
+        } else {
+          session.start();
+          sound.startMusic();
         }
       });
     }
 
     editor.querySelector(".back").addEventListener("click", () => {
-      stopCatSession();
-      resetPainting();
+      const card = session.drawing.card;
+      releaseBrush();
+      session.close();
+      sound.stop();
+      clearResultControls();
       editor.hidden = true;
       gallery.hidden = false;
+      setDrawingGesturesLocked(false);
       window.scrollTo(0, galleryScroll);
-      selectedCard.focus({ preventScroll: true });
+      card.focus({ preventScroll: true });
     });
 
     function positionOnCanvas(event) {
@@ -1695,6 +1536,7 @@
     }
 
     function paintBetween(start, end, color, radius) {
+      const silhouette = session.drawing.silhouette;
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / sampleSpacing));
@@ -1712,17 +1554,17 @@
       }
 
       if (!hasDots) return;
-      if (catTimer !== null) needsCoverageCheck = true;
 
       context.save();
       context.clip(silhouette);
       context.fillStyle = color;
       context.fill(dots);
       context.restore();
+      session.markPainted();
     }
 
     canvas.addEventListener("pointerdown", (event) => {
-      if (!replay.hidden || activeStroke || event.button !== 0) return;
+      if (!session.isPainting || activeStroke || event.button !== 0) return;
 
       const point = positionOnCanvas(event);
       const color = selectedSwatch.style.getPropertyValue("--ink");
@@ -1756,24 +1598,10 @@
       }
     }
 
-    function resetPainting() {
+    editor.querySelector(".tools .reset").addEventListener("click", () => {
       releaseBrush();
-      needsCoverageCheck = false;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-    }
-
-    editor.querySelector(".drawing-actions .reset").addEventListener("click", resetPainting);
-
-    function restartCat() {
-      rememberCatPaint(null);
-      stopCatSession();
-      resetPainting();
-      selectColor(defaultSwatch);
-      startCatSession();
-      editorTitle.focus({ preventScroll: true });
-    }
-
-    editor.querySelector(".restart-result").addEventListener("click", restartCat);
+      session.clearPaint();
+    });
   </script>
 </body>
 </html>
