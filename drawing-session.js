@@ -1,7 +1,7 @@
 "use strict";
 
 const DrawingTools = (() => {
-  const checkInterval = 5000;
+  const checkInterval = 8000;
   const completionPercent = 98;
   const solidAlpha = 128;
   const svgNamespace = "http://www.w3.org/2000/svg";
@@ -96,7 +96,10 @@ const DrawingTools = (() => {
       try {
         await image.decode();
         if (this.current !== current) return "stale";
+        this.context.save();
+        this.context.clip(current.drawing.silhouette);
         this.context.drawImage(image, 0, 0);
+        this.context.restore();
         return "restored";
       } catch {
         return this.current === current ? "invalid" : "stale";
@@ -147,14 +150,17 @@ const DrawingTools = (() => {
       this.enabled = true;
       this.context = null;
       this.chime = null;
+      this.completionBuffers = new Map();
+      this.soundGeneration = 0;
     }
 
-    startMusic() {
+    startMusic(completionSound) {
       if (!this.enabled) return;
       const AudioEngine = window.AudioContext || window.webkitAudioContext;
       if (AudioEngine) {
         this.context ??= new AudioEngine();
         this.context.resume().catch(() => {});
+        if (completionSound) this.loadCompletion(completionSound).catch(() => {});
       }
       this.resumeMusic();
     }
@@ -164,6 +170,7 @@ const DrawingTools = (() => {
     }
 
     pause() {
+      this.soundGeneration++;
       this.music.pause();
       this.effect.pause();
     }
@@ -176,10 +183,39 @@ const DrawingTools = (() => {
       this.chime = null;
     }
 
-    playCompletion() {
+    loadCompletion(name) {
+      if (!this.completionBuffers.has(name)) {
+        const source = window.childcolorSounds?.[name];
+        const request = fetch(source)
+          .then(response => {
+            if (!response.ok) throw new Error("Completion sound could not be loaded");
+            return response.arrayBuffer();
+          })
+          .then(bytes => this.context.decodeAudioData(bytes));
+        this.completionBuffers.set(name, request);
+        request.catch(() => this.completionBuffers.delete(name));
+      }
+      return this.completionBuffers.get(name);
+    }
+
+    playCompletion(name) {
       this.music.pause();
       const audio = this.context;
       if (!this.enabled || audio?.state !== "running") return;
+
+      if (name) {
+        const generation = ++this.soundGeneration;
+        this.loadCompletion(name).then(buffer => {
+          if (!this.enabled || this.soundGeneration !== generation || audio.state !== "running") return;
+          const bark = audio.createBufferSource();
+          bark.buffer = buffer;
+          this.chime?.disconnect();
+          this.chime = audio.createGain();
+          bark.connect(this.chime).connect(audio.destination);
+          bark.start();
+        }).catch(() => {});
+        return;
+      }
 
       this.chime = audio.createGain();
       this.chime.connect(audio.destination);
@@ -333,6 +369,28 @@ const DrawingTools = (() => {
         [0.9, "translate(-2%, 2%) rotate(-5deg)"],
       ],
     },
+    corgi: {
+      duration: 1250,
+      poses: [
+        [0.12, "translateY(2%) scale(1.04, 0.94)"],
+        [0.3, "translateY(-7%) rotate(-7deg) scale(0.98, 1.03)"],
+        [0.44, "translateY(1%) rotate(2deg) scale(1.04, 0.96)"],
+        [0.63, "translateY(-5%) rotate(8deg) scale(0.99, 1.02)"],
+        [0.78, "translateY(1%) rotate(-3deg) scale(1.02, 0.97)"],
+        [0.9, "translateY(-2%) rotate(2deg)"],
+      ],
+    },
+    dachshund: {
+      duration: 1300,
+      poses: [
+        [0.14, "translateX(-4%) rotate(-4deg) scale(0.98, 1.02)"],
+        [0.3, "translate(3%, -3%) rotate(4deg) scale(1.04, 0.97)"],
+        [0.45, "translateX(-3%) rotate(-5deg) scale(0.98, 1.03)"],
+        [0.62, "translate(4%, -5%) rotate(6deg) scale(1.03, 0.98)"],
+        [0.78, "translateX(-2%) rotate(-3deg) scale(0.99, 1.01)"],
+        [0.91, "translate(1%, -1%) rotate(2deg)"],
+      ],
+    },
     car: {
       duration: 990,
       poses: [
@@ -426,7 +484,7 @@ const DrawingTools = (() => {
 
     const png = await new Promise(resolve => exported.toBlob(resolve, "image/png"));
     if (!png) throw new Error("PNG export failed");
-    return new File([png], `${drawing.name} — Раскраска Анны.png`, { type: "image/png" });
+    return new File([png], `${drawing.name} — Раскраски для маленькой девочки.png`, { type: "image/png" });
   }
 
   async function saveFile(file) {

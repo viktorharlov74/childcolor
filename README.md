@@ -14,3 +14,6 @@
 ```sh
 python3 tools/build-local-linework.py
 ```
+
+
+Звук в `sounds/dog-bark.js` — [Tiny Dog Bark](https://freesound.org/people/qubodup/sounds/813120/), qubodup, из записи Glitchedtones, [CC0](https://creativecommons.org/publicdomain/zero/1.0/). Преобразован в моно WAV, сглажен и приглушён.
